@@ -6,11 +6,12 @@ on:
       video_data:
         description: 'JSON data from Pipedream'
         required: true
+        type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -23,8 +24,8 @@ jobs:
 
       - name: Install FFmpeg and Arabic Fonts
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-arabic fonts-hosny-amiri
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-arabic
 
       - name: Install Python Dependencies
         run: |
@@ -32,15 +33,18 @@ jobs:
           pip install moviepy==1.0.3
           pip install arabic-reshaper python-bidi
           pip install cloudinary requests
+          pip install imageio-ffmpeg
 
       - name: Download Arabic Font
         run: |
           mkdir -p fonts
-          wget -O fonts/NotoNaskhArabic-Regular.ttf "https://github.com/google/fonts/raw/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf" || true
+          wget -q -O fonts/NotoNaskhArabic-Regular.ttf \
+            "https://github.com/google/fonts/raw/main/ofl/notonaskharabic/NotoNaskhArabic%5Bwght%5D.ttf"
+          ls -la fonts/
 
       - name: Render Video
         env:
           CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
           VIDEO_DATA: ${{ github.event.inputs.video_data }}
         run: |
-          python render_script.py
+          python .github/workflows/render_script.py
