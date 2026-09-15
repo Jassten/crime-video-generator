@@ -1,12 +1,6 @@
 """
-Crime Video Generator — Full Render Pipeline
-=============================================
-✓ Audio enhancement (highpass, lowpass, compressor, loudnorm)
-✓ Background music with ducking (sidechaincompress)
-✓ PIL image preprocessing (fixes MoviePy resize bug)
-✓ Ken Burns effect on images
-✓ Arabic text overlay with RTL support
-✓ Cloudinary upload with manual URL parsing
+Crime Video Generator — Full Pipeline
+======================================
 """
 
 import os
@@ -93,14 +87,14 @@ try:
         '/tmp/narration_enhanced.mp3'
     ], check=True, capture_output=True)
     print("✅ الصوت محسّن (4 فلاتر)")
-except subprocess.CalledProcessError as e:
-    print(f"⚠️ فشل التحسين، استخدام الصوت الأصلي")
+except subprocess.CalledProcessError:
+    print("⚠️ استخدام الصوت الأصلي")
     import shutil
     shutil.copy('/tmp/narration.mp3', '/tmp/narration_enhanced.mp3')
 
 
 # ════════════════════════════════════════════════════════
-# 4) موسيقى خلفية (Ducking)
+# 4) موسيقى خلفية
 # ════════════════════════════════════════════════════════
 final_audio_path = '/tmp/narration_enhanced.mp3'
 
@@ -202,13 +196,12 @@ for i in range(len(images)):
 
     base_clip = ImageClip(img_path).set_duration(per_image_duration)
 
-    # Ken Burns
+    # Ken Burns (بدون resize متسلسل)
     try:
         dur = per_image_duration
         zoomed = base_clip.resize(lambda t: 1.0 + 0.08 * (t / dur))
         zoomed = zoomed.set_position('center')
-    except Exception as e:
-        print(f"  ⚠️ Ken Burns {i}: {e}")
+    except Exception:
         zoomed = base_clip.set_position('center')
 
     # نص عربي
@@ -235,14 +228,16 @@ for i in range(len(images)):
                 [zoomed, txt_bg, txt],
                 size=(VIDEO_WIDTH, VIDEO_HEIGHT)
             )
+            print(f"  ✅ مقطع {i+1} (مع نص)")
         except Exception as e:
             print(f"  ⚠️ نص فشل {i}: {e}")
             clip = CompositeVideoClip([zoomed], size=(VIDEO_WIDTH, VIDEO_HEIGHT))
+            print(f"  ✅ مقطع {i+1} (بدون نص)")
     else:
         clip = CompositeVideoClip([zoomed], size=(VIDEO_WIDTH, VIDEO_HEIGHT))
+        print(f"  ✅ مقطع {i+1}")
 
     clips.append(clip)
-    print(f"  ✅ مقطع {i+1}/{len(images)}")
 
 if not clips:
     raise Exception("No clips generated")
@@ -273,45 +268,58 @@ print(f"✅ الفيديو جاهز ({size_mb:.1f} MB)")
 
 
 # ════════════════════════════════════════════════════════
-# 9) رفع Cloudinary (parse manual)
+# 9) رفع Cloudinary
 # ════════════════════════════════════════════════════════
 print("\n☁️ رفع إلى Cloudinary...")
 
 cloudinary_url = os.environ['CLOUDINARY_URL']
-try:
-    parts = cloudinary_url.replace('cloudinary://', '').split('@')
-    auth = parts[0].split(':')
-    api_key = auth[0]
-    api_secret = auth[1]
-    cloud_name = parts[1]
+print(f"🔍 URL prefix: {cloudinary_url[:40]}...")
 
-    print(f"🔑 Cloud: {cloud_name} | Key: {api_key[:8]}...")
+# فك الرابط: cloudinary://KEY:SECRET@CLOUD
+clean = cloudinary_url.replace('cloudinary://', '')
 
-    cloudinary.config(
-        cloud_name=cloud_name,
-        api_key=api_key,
-        api_secret=api_secret,
-        secure=True
-    )
+if '@' not in clean:
+    print("❌ خطأ: الرابط يجب أن يحتوي على @")
+    print(f"   الرابط الحالي: {clean[:60]}...")
+    raise ValueError("Invalid Cloudinary URL: missing @")
 
-    result = cloudinary.uploader.upload(
-        '/tmp/final_output.mp4',
-        resource_type='video',
-        folder='crime_videos',
-        public_id=f'crime_video_{int(time.time())}',
-        overwrite=True
-    )
+parts = clean.split('@')
+auth_part = parts[0]
+cloud_name = parts[1]
 
-    print("")
-    print("=" * 60)
-    print("🎉 تم إنشاء الفيديو بنجاح!")
-    print(f"🔗 الرابط: {result['secure_url']}")
-    print(f"⏱️ المدة: {result.get('duration', 'N/A')}s")
-    print(f"📦 الحجم: {size_mb:.1f} MB")
-    print("=" * 60)
-    print("")
-    print(f"VIDEO_URL={result['secure_url']}")
+if ':' not in auth_part:
+    print("❌ خطأ: يجب وضع ':' بين API_KEY و API_SECRET")
+    print(f"   الموجود: {auth_part[:60]}...")
+    print("   الصحيح:  API_KEY:API_SECRET@CLOUD_NAME")
+    raise ValueError("Invalid Cloudinary URL: missing : between key and secret")
 
-except Exception as e:
-    print(f"❌ فشل الرفع: {e}")
-    raise
+api_key, api_secret = auth_part.split(':', 1)
+
+print(f"🔑 Cloud: {cloud_name}")
+print(f"🔑 Key: {api_key[:8]}...")
+print(f"🔑 Secret: {api_secret[:6]}... (len={len(api_secret)})")
+
+cloudinary.config(
+    cloud_name=cloud_name,
+    api_key=api_key,
+    api_secret=api_secret,
+    secure=True
+)
+
+result = cloudinary.uploader.upload(
+    '/tmp/final_output.mp4',
+    resource_type='video',
+    folder='crime_videos',
+    public_id=f'crime_video_{int(time.time())}',
+    overwrite=True
+)
+
+print("")
+print("=" * 60)
+print("🎉 تم إنشاء الفيديو بنجاح!")
+print(f"🔗 الرابط: {result['secure_url']}")
+print(f"⏱️ المدة: {result.get('duration', 'N/A')}s")
+print(f"📦 الحجم: {size_mb:.1f} MB")
+print("=" * 60)
+print("")
+print(f"VIDEO_URL={result['secure_url']}")
