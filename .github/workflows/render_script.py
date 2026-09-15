@@ -1,11 +1,12 @@
 """
 Crime Video Generator — Full Render Pipeline
-==========================================
-- Audio enhancement (highpass, lowpass, compressor, loudnorm)
-- Background music with ducking (sidechaincompress)
-- Ken Burns effect on images
-- Arabic text overlay with RTL support
-- Cloudinary upload
+=============================================
+✓ Audio enhancement (highpass, lowpass, compressor, loudnorm)
+✓ Background music with ducking (sidechaincompress)
+✓ PIL image preprocessing (fixes MoviePy resize bug)
+✓ Ken Burns effect on images
+✓ Arabic text overlay with RTL support
+✓ Cloudinary upload
 """
 
 import os
@@ -15,30 +16,32 @@ import requests
 import time
 import arabic_reshaper
 from bidi.algorithm import get_display
+from PIL import Image
 from moviepy.editor import (
     ImageClip, AudioFileClip, CompositeAudioClip,
-    concatenate_videoclips, TextClip, CompositeVideoClip,
-    VideoFileClip
+    concatenate_videoclips, TextClip, CompositeVideoClip
 )
 import cloudinary
 import cloudinary.uploader
 
 
 # ════════════════════════════════════════════════════════
-# 0) إعدادات عامة
+# 0) الإعدادات العامة
 # ════════════════════════════════════════════════════════
 VIDEO_WIDTH = 1080
 VIDEO_HEIGHT = 1920
 FPS = 30
 FONT_PATH = 'fonts/NotoNaskhArabic-Regular.ttf'
 
-# موسيقى خلفية (رابط مباشر لملف mp3 هادئ)
-# يمكن استبداله بأي رابط آخر
-BACKGROUND_MUSIC_URL = "https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=dark-ambient-114557.mp3"
+# موسيقى خلفية هادئة (Pixabay — رابط مباشر)
+BACKGROUND_MUSIC_URL = (
+    "https://cdn.pixabay.com/download/audio/2022/05/27/"
+    "audio_1808fbf07a.mp3?filename=dark-ambient-114557.mp3"
+)
 
 
 # ════════════════════════════════════════════════════════
-# 1) استقبال البيانات
+# 1) استقبال البيانات من Pipedream
 # ════════════════════════════════════════════════════════
 print("=" * 60)
 print("🎬 بدء عملية إنتاج الفيديو")
@@ -53,56 +56,67 @@ enable_music = video_data.get('enable_music', True)
 
 print(f"📊 عدد الصور: {len(images)}")
 print(f"📝 عدد الجمل: {len(sentences)}")
-print(f"⏱️ المدة: {total_duration}s")
+print(f"⏱️ المدة الكلية: {total_duration}s")
 print(f"🎵 موسيقى خلفية: {'نعم' if enable_music else 'لا'}")
 
 per_image_duration = total_duration / len(images)
-print(f"⏱️ مدة كل صورة: {per_image_duration:.1f}s")
+print(f"⏱️ مدة كل صورة: {per_image_duration:.2f}s")
 
 
 # ════════════════════════════════════════════════════════
 # 2) تحميل الصوت الأصلي
 # ════════════════════════════════════════════════════════
-print("\n[1/6] 🎙️ تحميل الصوت الأصلي...")
-audio_res = requests.get(audio_url, timeout=120)
-audio_res.raise_for_status()
-with open('/tmp/narration.mp3', 'wb') as f:
-    f.write(audio_res.content)
-print(f"✅ الصوت محمّل ({len(audio_res.content) / 1024:.0f} KB)")
+print("\n[1/7] 🎙️ تحميل الصوت من Cloudinary...")
+try:
+    audio_res = requests.get(audio_url, timeout=120)
+    audio_res.raise_for_status()
+    with open('/tmp/narration.mp3', 'wb') as f:
+        f.write(audio_res.content)
+    print(f"✅ الصوت محمّل ({len(audio_res.content) / 1024:.0f} KB)")
+except Exception as e:
+    print(f"❌ فشل تحميل الصوت: {e}")
+    raise
 
 
 # ════════════════════════════════════════════════════════
 # 3) تحسين جودة الصوت بـ FFmpeg
 # ════════════════════════════════════════════════════════
-print("\n[2/6] 🎚️ تحسين الصوت...")
+print("\n[2/7] 🎚️ تحسين الصوت...")
 
 audio_filter = (
-    "highpass=f=80,"           # إزالة الترددات المنخفضة (ضوضاء)
-    "lowpass=f=8000,"          # إزالة الترددات العالية
-    "acompressor=threshold=0.5:ratio=3:attack=5:release=50,"  # ضغط ناعم
-    "loudnorm=I=-16:TP=-1.5:LRA=11"  # تطبيع المعيار
+    "highpass=f=80,"                                                 # إزالة الضوضاء المنخفضة
+    "lowpass=f=8000,"                                                # إزالة الترددات العالية
+    "acompressor=threshold=0.5:ratio=3:attack=5:release=50,"         # ضغط ناعم
+    "loudnorm=I=-16:TP=-1.5:LRA=11"                                  # معيار البث
 )
 
-subprocess.run([
-    'ffmpeg', '-y', '-i', '/tmp/narration.mp3',
-    '-af', audio_filter,
-    '-ar', '44100', '-ac', '2',
-    '/tmp/narration_enhanced.mp3'
-], check=True, capture_output=True)
-print("✅ الصوت محسّن (فلاتر عالية الجودة)")
+try:
+    subprocess.run([
+        'ffmpeg', '-y', '-i', '/tmp/narration.mp3',
+        '-af', audio_filter,
+        '-ar', '44100', '-ac', '2',
+        '/tmp/narration_enhanced.mp3'
+    ], check=True, capture_output=True)
+    print("✅ الصوت محسّن (4 فلاتر)")
+except subprocess.CalledProcessError as e:
+    print(f"⚠️ فشل تحسين الصوت: {e.stderr.decode()[:200] if e.stderr else e}")
+    import shutil
+    shutil.copy('/tmp/narration.mp3', '/tmp/narration_enhanced.mp3')
 
 
 # ════════════════════════════════════════════════════════
 # 4) إضافة موسيقى خلفية مع Ducking
 # ════════════════════════════════════════════════════════
+final_audio_path = '/tmp/narration_enhanced.mp3'
+
 if enable_music:
-    print("\n[3/6] 🎵 إضافة موسيقى خلفية (Ducking)...")
+    print("\n[3/7] 🎵 إضافة موسيقى خلفية (Ducking)...")
     try:
         music_res = requests.get(BACKGROUND_MUSIC_URL, timeout=60)
+        music_res.raise_for_status()
         with open('/tmp/music.mp3', 'wb') as f:
             f.write(music_res.content)
 
-        # دمج الصوت + موسيقى مع Ducking
         ducking_filter = (
             "[1:a]volume=0.15[music];"
             "[music][0:a]sidechaincompress="
@@ -126,13 +140,13 @@ if enable_music:
         print(f"⚠️ فشل إضافة الموسيقى: {e}")
         final_audio_path = '/tmp/narration_enhanced.mp3'
 else:
-    final_audio_path = '/tmp/narration_enhanced.mp3'
+    print("\n[3/7] ⏭️ تخطي الموسيقى (معطّلة)")
 
 
 # ════════════════════════════════════════════════════════
-# 5) تحميل الصور
+# 5) تحميل الصور من Pollinations
 # ════════════════════════════════════════════════════════
-print("\n[4/6] 🖼️ تحميل الصور من Pollinations...")
+print("\n[4/7] 🖼️ تحميل الصور من Pollinations...")
 
 for i, url in enumerate(images):
     try:
@@ -143,44 +157,70 @@ for i, url in enumerate(images):
         print(f"  ✅ صورة {i+1}/{len(images)} ({len(res.content)/1024:.0f} KB)")
     except Exception as e:
         print(f"  ⚠️ فشل صورة {i+1}: {e}")
-        # نسخ أول صورة كبديل
         if i > 0 and os.path.exists('/tmp/img_0.jpg'):
             import shutil
             shutil.copy('/tmp/img_0.jpg', f'/tmp/img_{i}.jpg')
 
 
 # ════════════════════════════════════════════════════════
-# 6) بناء المقاطع (Ken Burns + نص عربي)
+# 6) تجهيز الصور بـ PIL (حجم موحد 1080×1920)
 # ════════════════════════════════════════════════════════
-print("\n[5/6] 🎬 بناء المقاطع مع Ken Burns + النص العربي...")
+print("\n[5/7] 🔧 تجهيز الصور بـ PIL...")
+
+for i in range(len(images)):
+    src = f'/tmp/img_{i}.jpg'
+    dst = f'/tmp/img_fixed_{i}.jpg'
+
+    if not os.path.exists(src):
+        continue
+
+    try:
+        img = Image.open(src).convert('RGB')
+        w, h = img.size
+        target_ratio = VIDEO_WIDTH / VIDEO_HEIGHT
+        current_ratio = w / h
+
+        # قص للنسبة الصحيحة (Center Crop)
+        if current_ratio > target_ratio:
+            new_w = int(h * target_ratio)
+            left = (w - new_w) // 2
+            img = img.crop((left, 0, left + new_w, h))
+        else:
+            new_h = int(w / target_ratio)
+            top = (h - new_h) // 2
+            img = img.crop((0, top, w, top + new_h))
+
+        # تغيير الحجم إلى 1080×1920
+        img = img.resize((VIDEO_WIDTH, VIDEO_HEIGHT), Image.LANCZOS)
+        img.save(dst, 'JPEG', quality=92)
+        print(f"  ✅ صورة {i+1} جاهزة (1080×1920)")
+    except Exception as e:
+        print(f"  ⚠️ فشل تجهيز صورة {i+1}: {e}")
+
+
+# ════════════════════════════════════════════════════════
+# 7) بناء المقاطع (Ken Burns + النص العربي)
+# ════════════════════════════════════════════════════════
+print("\n[6/7] 🎞️ بناء المقاطع مع Ken Burns + النص...")
 
 clips = []
 
 for i in range(len(images)):
-    img_path = f'/tmp/img_{i}.jpg'
+    img_path = f'/tmp/img_fixed_{i}.jpg'
     if not os.path.exists(img_path):
         continue
 
-    # ─── Ken Burns Effect (تكبير بطيء) ───
+    # Clip أساسي
     base_clip = ImageClip(img_path).set_duration(per_image_duration)
 
-    # تكييف الحجم (9:16)
-    base_clip = base_clip.resize(height=VIDEO_HEIGHT)
-
-    if base_clip.w < VIDEO_WIDTH:
-        base_clip = base_clip.resize(width=VIDEO_WIDTH)
-
-    # قص للنسبة الصحيحة
-    base_clip = base_clip.crop(
-        x_center=base_clip.w / 2,
-        y_center=base_clip.h / 2,
-        width=VIDEO_WIDTH,
-        height=VIDEO_HEIGHT
-    )
-
-    # Ken Burns: تكبير بطيء من 1.0 إلى 1.05
-    base_clip = base_clip.resize(lambda t: 1 + 0.05 * (t / per_image_duration))
-    base_clip = base_clip.set_position('center')
+    # ─── Ken Burns: تكبير بطيء من 1.0 إلى 1.08 ───
+    try:
+        dur = per_image_duration
+        zoomed = base_clip.resize(lambda t: 1.0 + 0.08 * (t / dur))
+        zoomed = zoomed.set_position('center')
+    except Exception as e:
+        print(f"  ⚠️ Ken Burns فشل {i}: {e}")
+        zoomed = base_clip.set_position('center')
 
     # ─── النص العربي ───
     text = sentences[i] if i < len(sentences) else ""
@@ -190,7 +230,7 @@ for i in range(len(images)):
             reshaped = arabic_reshaper.reshape(text)
             bidi_text = get_display(reshaped)
 
-            # النص مع خلفية سوداء
+            # خلفية النص (سميكة)
             txt_bg = TextClip(
                 bidi_text,
                 fontsize=60,
@@ -201,8 +241,9 @@ for i in range(len(images)):
                 method='caption',
                 size=(VIDEO_WIDTH - 120, None),
                 align='center'
-            ).set_position(('center', VIDEO_HEIGHT - 500)).set_duration(per_image_duration)
+            ).set_position(('center', VIDEO_HEIGHT - 480)).set_duration(per_image_duration)
 
+            # النص الأمامي (أبيض)
             txt = TextClip(
                 bidi_text,
                 fontsize=60,
@@ -213,26 +254,30 @@ for i in range(len(images)):
                 method='caption',
                 size=(VIDEO_WIDTH - 120, None),
                 align='center'
-            ).set_position(('center', VIDEO_HEIGHT - 500)).set_duration(per_image_duration)
+            ).set_position(('center', VIDEO_HEIGHT - 480)).set_duration(per_image_duration)
 
             clip = CompositeVideoClip(
-                [base_clip, txt_bg, txt],
+                [zoomed, txt_bg, txt],
                 size=(VIDEO_WIDTH, VIDEO_HEIGHT)
             )
         except Exception as e:
-            print(f"  ⚠️ فشل النص {i+1}: {e}")
-            clip = CompositeVideoClip([base_clip], size=(VIDEO_WIDTH, VIDEO_HEIGHT))
+            print(f"  ⚠️ النص فشل {i}: {e}")
+            clip = CompositeVideoClip([zoomed], size=(VIDEO_WIDTH, VIDEO_HEIGHT))
     else:
-        clip = CompositeVideoClip([base_clip], size=(VIDEO_WIDTH, VIDEO_HEIGHT))
+        clip = CompositeVideoClip([zoomed], size=(VIDEO_WIDTH, VIDEO_HEIGHT))
 
     clips.append(clip)
     print(f"  ✅ مقطع {i+1}/{len(images)}")
 
+if not clips:
+    print("❌ لا توجد مقاطع — توقف")
+    raise Exception("No clips generated")
+
 
 # ════════════════════════════════════════════════════════
-# 7) دمج المقاطع + الصوت + تصدير
+# 8) دمج المقاطع + الصوت
 # ════════════════════════════════════════════════════════
-print("\n[6/6] 🎞️ دمج المقاطع وإضافة الصوت...")
+print("\n[7/7] 🎬 دمج المقاطع وإضافة الصوت...")
 
 final_video = concatenate_videoclips(clips, method="compose")
 
@@ -240,7 +285,7 @@ final_video = concatenate_videoclips(clips, method="compose")
 audio = AudioFileClip(final_audio_path)
 final_video = final_video.set_audio(audio)
 
-# تصدير
+# تصدير الفيديو
 print("💾 تصدير الفيديو...")
 final_video.write_videofile(
     '/tmp/final_output.mp4',
@@ -258,9 +303,9 @@ print(f"✅ الفيديو جاهز ({size_mb:.1f} MB)")
 
 
 # ════════════════════════════════════════════════════════
-# 8) رفع إلى Cloudinary
+# 9) رفع إلى Cloudinary
 # ════════════════════════════════════════════════════════
-print("\n☁️ رفع إلى Cloudinary...")
+print("\n☁️ رفع الفيديو إلى Cloudinary...")
 
 cloudinary.config(cloudinary_url=os.environ['CLOUDINARY_URL'])
 
@@ -272,12 +317,15 @@ result = cloudinary.uploader.upload(
     overwrite=True
 )
 
+# ════════════════════════════════════════════════════════
+# 10) النتيجة النهائية
+# ════════════════════════════════════════════════════════
+print("")
 print("=" * 60)
 print("🎉 تم إنشاء الفيديو بنجاح!")
 print(f"🔗 الرابط: {result['secure_url']}")
 print(f"⏱️ المدة: {result.get('duration', 'N/A')}s")
 print(f"📦 الحجم: {size_mb:.1f} MB")
 print("=" * 60)
-
-# طباعة الرابط ليتم التقاطه
-print(f"\nVIDEO_URL={result['secure_url']}")
+print("")
+print(f"VIDEO_URL={result['secure_url']}")
