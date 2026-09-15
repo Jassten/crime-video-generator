@@ -25,7 +25,7 @@ jobs:
       - name: Install FFmpeg and Arabic Fonts
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-arabic
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
 
       - name: Install Python Dependencies
         run: |
